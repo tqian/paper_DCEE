@@ -1,0 +1,228 @@
+---
+title: "HeartSteps Distal Outcome CEE Analysis"
+author: "Tianchen Qian"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Introduction
+
+We analyze the distal outcome causal excursion effect using the HeartSteps V1
+data set, where the distal outcome is defined as the average daily step count
+for the last week of the study, and we consider the intervention period as the
+first five weeks of the study.
+
+## Setup
+
+Load necessary packages:
+
+```{r setup, message=FALSE, warning=FALSE}
+# Load necessary packages
+library(tidyverse)
+library(mgcv)
+library(splines)
+
+# Source estimator implementation
+source("estimator_distal_outcome.R")
+```
+
+## Data Preparation
+
+Here we load the dataset, filter out incomplete cases and decision points above 210, and compute several new variables.
+
+```{r data-prep}
+# Load the HeartSteps dataset
+dta <- readRDS("HeartSteps_dta_treatment_and_proximal.RDS")
+
+# Remove observations with missing values
+dta <- dta[complete.cases(dta), ]
+
+# Filter out rows with decision.index.nogap.new >= 210
+dta <- dta %>% filter(decision.index.nogap.new < 210)
+
+# Compute average daily steps for the last week for each user 
+last_week_data <- dta %>%
+  group_by(user.index) %>%
+  arrange(desc(decision.index.nogap.new)) %>%  # sort descending
+  slice_head(n = 35) %>%                       # last 35 decision points
+  summarise(avg_daily_step_last_week = sum(jbsteps_between_decision_points, na.rm = TRUE) / 7, .groups = 'drop')
+
+# Merge last week average steps back into the main dataset
+dta <- left_join(dta, last_week_data, by = "user.index")
+
+# Compute the maximum decision index for each user
+max_decision_index <- dta %>%
+  group_by(user.index) %>%
+  summarise(max_decision_index = max(decision.index.nogap.new, na.rm = TRUE), .groups = 'drop')
+
+# Merge maximum decision index into the dataset
+dta <- left_join(dta, max_decision_index, by = "user.index")
+
+# Create a new variable 'day' from decision.index.nogap.new (assuming 5 decisions per day)
+dta$day <- floor(dta$decision.index.nogap.new / 5 + 1)
+
+# Create a dataset that excludes the last week (last 35 decision points per user)
+dta_excluding_last_week <- dta %>%
+  group_by(user.index) %>%
+  arrange(desc(decision.index.nogap.new)) %>%  # sort descending
+  slice(-(1:35)) %>%                           # exclude the last 35 rows
+  ungroup()
+
+# Sort both datasets by user.index and decision.index.nogap.new (ascending)
+dta <- dta %>% arrange(user.index, decision.index.nogap.new)
+dta_excluding_last_week <- dta_excluding_last_week %>% arrange(user.index, decision.index.nogap.new)
+
+# Define control variables for subsequent analyses
+control_vars <- c("jbsteps30pre", "home_work")
+control_vars_spline <- c("jbsteps30pre")
+```
+
+## Analysis of the Average Effect
+
+We estimate the average treatment effect (without any moderator) using our proposed function.
+
+```{r analysis-average-effect}
+result_avg_effect <- dta_excluding_last_week %>% 
+  estimator_ml_for_nuisance(
+    moderator_var = NULL,
+    ml_method = "gam",
+    cross_fit = FALSE,
+    id_var = "user.index",
+    control_var = control_vars,
+    control_var_spline = control_vars_spline,
+    trt_var = "send",
+    outcome_var = "avg_daily_step_last_week", 
+    prob_A_var = "rand_prob",
+    avail_var = "avail"
+  )
+result_avg_effect
+summary(result_avg_effect$regfit_a0)
+summary(result_avg_effect$regfit_a1)
+```
+
+## Analysis of Effect Moderation by decision.index.nogap.new
+
+Next, we examine whether the effect is moderated by decision.index.nogap.new.
+
+```{r analysis-moderation-decision-point}
+result_moderation_decision_point <- dta_excluding_last_week %>% 
+  estimator_ml_for_nuisance(
+    moderator_var = "decision.index.nogap.new",
+    ml_method = "gam",
+    cross_fit = FALSE,
+    id_var = "user.index",
+    control_var = control_vars,
+    control_var_spline = control_vars_spline,
+    trt_var = "send",
+    outcome_var = "avg_daily_step_last_week", 
+    prob_A_var = "rand_prob",
+    avail_var = "avail"
+  )
+result_moderation_decision_point
+```
+
+## Analysis of Effect Moderation by Day Using Splines
+
+We now model moderation by day using a spline expansion. First, we generate 
+spline basis functions for the day variable and merge them into the dataset.
+
+```{r spline-prep}
+# Set the degrees of freedom for the spline expansion
+spline_degrees <- 6
+
+# Generate B-spline basis for the 'day' variable
+spline_basis <- bs(dta$day, df = spline_degrees)
+
+# Convert the matrix to a data frame with informative column names
+spline_df <- as.data.frame(spline_basis)
+colnames(spline_df) <- paste0("spline_", seq_len(ncol(spline_df)))
+
+# Bind the spline basis to the main dataset
+dta <- cbind(dta, spline_df)
+
+# Update control variables for the day-based analysis
+control_vars_day <- c("jbsteps30pre", "home_work")
+control_vars_day_spline <- c("jbsteps30pre")
+
+# Create a vector of spline variable names for use as moderator variables
+spline_vars <- paste0("spline_", 1:spline_degrees)
+```
+
+Now we estimate the model where the effect is moderated by these spline variables.
+
+```{r analysis-moderation-day-spline}
+fit <- dta %>% 
+  estimator_ml_for_nuisance(
+    moderator_var = spline_vars,
+    ml_method = "gam",
+    cross_fit = FALSE,
+    id_var = "user.index",
+    control_var = control_vars_day,
+    control_var_spline = control_vars_day_spline,
+    trt_var = "send",
+    outcome_var = "avg_daily_step_last_week", 
+    prob_A_var = "rand_prob",
+    avail_var = "avail"
+  )
+
+fit
+
+```
+
+Using the spline-based model, we compute predictions for the outcome over a range of day values and construct 95% confidence intervals.
+
+```{r analysis-moderation-day-visualization, fig.height = 6, fig.width = 8}
+
+# Step 0: Extract estimated coefficients and the variance-covariance matrix
+beta_hat <- fit$beta_hat
+varcov   <- fit$beta_varcov
+
+# Step 1: Create a sequence of day values for prediction
+new_day_values <- 1:35
+
+# Step 2: Compute the B-spline basis for these new day values
+new_spline_basis <- bs(new_day_values, df = spline_degrees)
+
+# Step 3: Construct the design matrix (including the intercept)
+design_matrix <- cbind(1, new_spline_basis)
+
+# Step 4: Compute estimated CEE: CEE = S * beta_hat
+predicted_values <- design_matrix %*% beta_hat
+
+# Step 5: Compute standard errors for the CEE estimates
+pred_se <- sqrt(diag(design_matrix %*% varcov %*% t(design_matrix)))
+
+# Step 6: Construct 95% Confidence Intervals
+lower_bound <- predicted_values - 1.96 * pred_se
+upper_bound <- predicted_values + 1.96 * pred_se
+
+# Step 7: Create a data frame with the estimated CEE and CI
+pred_df <- data.frame(
+  day = new_day_values,
+  predicted = predicted_values,
+  lower = lower_bound,
+  upper = upper_bound
+)
+
+# Step 8: Plot the estimated CEE with confidence intervals
+ggplot(pred_df, aes(x = day, y = predicted)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "blue") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Day",
+       y = "Distal Outcome CEE") +
+  theme_minimal()
+```
+
+We make and save the plot to be included in the paper:
+
+```{r plot-for-paper}
+p <- ggplot(pred_df, aes(x = day, y = predicted)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "blue") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Day",
+       y = "Distal Outcome CEE") +
+  theme_minimal()
+ggsave("heartsteps-cee.pdf", p, width = 6, height = 4)
+```
