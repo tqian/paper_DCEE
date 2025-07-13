@@ -12,7 +12,7 @@
 
 ### Builds the job index
 # Create a sequential range
-array_values=`seq 800`
+array_values=`seq 1220`
 
 # Launch the job and then remove the temporarily created qsub file.
 for i in $array_values

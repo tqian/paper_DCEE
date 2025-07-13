@@ -2,6 +2,8 @@ library(tidyverse)
 library(mgcv)
 library(DTRreg)
 library(geepack)
+library(ranger)
+library(MRTAnalysis)
 
 args <- commandArgs(trailingOnly = TRUE)
 itask <- as.integer(args[1])
@@ -14,7 +16,9 @@ print_every_n_sims <- 10
 
 simulation_design <- expand.grid(
     seed = seed,
-    method = c("DCEE-lm", "DCEE-gam", "DCEE-lm-cf", "DCEE-gam-cf", "GEE", "SNMM"),
+    method = c("DCEE-lm", "DCEE-gam", "DCEE-ranger", 
+               "DCEE-lm-cf", "DCEE-gam-cf", "DCEE-ranger-cf", 
+               "GEE", "SNMM", "WCLS"),
     sample_size = c(30, 50, 100, 200, 300, 400, 500),
     estimand = c("marginal", "moderated")
 )
@@ -151,6 +155,46 @@ for (isim in 1:nsim_per_task) {
             trt_var = "A", outcome_var = "Y", prob_A_var = "prob_A",
             avail_var = "avail", control_var_spline = "X"
         )
+    } else if (method == "DCEE-ranger" & estimand == "marginal") {
+        beta <- estimator_ml_for_nuisance(
+            moderator_var = NULL,
+            ml_method = "ranger",
+            cross_fit = FALSE,
+            cf_fold = 5,
+            dta = dta, id_var = "userid", control_var = c("X", "Z"),
+            trt_var = "A", outcome_var = "Y", prob_A_var = "prob_A",
+            avail_var = "avail", control_var_spline = "X"
+        )
+    } else if (method == "DCEE-ranger" & estimand == "moderated") {
+        beta <- estimator_ml_for_nuisance(
+            moderator_var = "Z",
+            ml_method = "ranger",
+            cross_fit = FALSE,
+            cf_fold = 5,
+            dta = dta, id_var = "userid", control_var = c("X", "Z"),
+            trt_var = "A", outcome_var = "Y", prob_A_var = "prob_A",
+            avail_var = "avail", control_var_spline = "X"
+        )
+    } else if (method == "DCEE-ranger-cf" & estimand == "marginal") {
+        beta <- estimator_ml_for_nuisance(
+            moderator_var = NULL,
+            ml_method = "ranger",
+            cross_fit = TRUE,
+            cf_fold = 5,
+            dta = dta, id_var = "userid", control_var = c("X", "Z"),
+            trt_var = "A", outcome_var = "Y", prob_A_var = "prob_A",
+            avail_var = "avail", control_var_spline = "X"
+        )
+    } else if (method == "DCEE-ranger-cf" & estimand == "moderated") {
+        beta <- estimator_ml_for_nuisance(
+            moderator_var = "Z",
+            ml_method = "ranger",
+            cross_fit = TRUE,
+            cf_fold = 5,
+            dta = dta, id_var = "userid", control_var = c("X", "Z"),
+            trt_var = "A", outcome_var = "Y", prob_A_var = "prob_A",
+            avail_var = "avail", control_var_spline = "X"
+        )
     } else if (method == "GEE" & estimand == "marginal") {
         fit <- geeglm(Y ~ A + X + Z, data = dta, corstr = "independence", id = dta$userid)
         beta <- list(beta_hat = coef(fit)["A"], beta_se = sqrt(vcov(fit)["A", "A"]))
@@ -240,7 +284,53 @@ for (isim in 1:nsim_per_task) {
             # In case of any error, return beta_hat as c(NA,NA)
             list(beta_hat = c(NA,NA))
         })
-    }
+    } else if (method == "WCLS" & estimand == "marginal") {
+        fit <- wcls(data = dta,
+                    id = "userid",
+                    outcome = "Y",
+                    treatment = "A",
+                    rand_prob = "prob_A",
+                    moderator_formula = ~1,
+                    control_formula = ~ X + Z,
+                    availability = "avail",
+                    verbose = FALSE)
+        fit_table <- summary(fit)$causal_excursion_effect
+        beta_hat <- fit_table[1, "Estimate"]
+        names(beta_hat) <- "Intercept"
+        beta_se <- fit_table[1, "StdErr"]
+        names(beta_se) <- "Intercept"
+        conf_int <- matrix(c(fit_table[1, "95% LCL"], fit_table[1, "95% UCL"]), nrow = 1)
+        rownames(conf_int) <- "Intercept"
+        colnames(conf_int) <- c("2.5 %", "97.5 %")
+        conf_int_tquantile <- conf_int
+        beta <- list(beta_hat = beta_hat, 
+                     beta_se = beta_se,
+                     conf_int = conf_int,
+                     conf_int_tquantile = conf_int_tquantile)
+    } else if (method == "WCLS" & estimand == "moderated") {
+        fit <- wcls(data = dta,
+                    id = "userid",
+                    outcome = "Y",
+                    treatment = "A",
+                    rand_prob = "prob_A",
+                    moderator_formula = ~Z,
+                    control_formula = ~ X + Z,
+                    availability = "avail",
+                    verbose = FALSE)
+        fit_table <- summary(fit)$causal_excursion_effect
+        beta_hat <- c(fit_table["(Intercept)", "Estimate"], fit_table["Z", "Estimate"])
+        names(beta_hat) <- c("Intercept", "Z")
+        beta_se <- c(fit_table["(Intercept)", "StdErr"], fit_table["Z", "StdErr"])
+        names(beta_se) <- c("Intercept", "Z")
+        conf_int <- fit_table[c("(Intercept)", "Z"), c("95% LCL", "95% UCL")]
+        rownames(conf_int) <- c("Intercept", "Z")
+        colnames(conf_int) <- c("2.5 %", "97.5 %")
+        conf_int_tquantile <- conf_int
+        beta <- list(beta_hat = beta_hat, 
+                     beta_se = beta_se,
+                     conf_int = conf_int,
+                     conf_int_tquantile = conf_int_tquantile)
+    } 
     result_collected <- c(result_collected, list(beta))
 }
 
