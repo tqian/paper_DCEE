@@ -28,6 +28,7 @@ estimator_ml_for_nuisance <- function(
     
     if (ml_method == "zero") {
         dta$mu_hat_0 <- dta$mu_hat_1 <- 0
+        regfit_a0 <- regfit_a1 <- NULL
     } else {
         if (ml_method == "sl.smooth") {
             sl.library <- c("SL.mean", "SL.glm", "SL.gam", "SL.earth")
