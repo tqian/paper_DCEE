@@ -173,148 +173,229 @@ df_beta1 <- df_beta1 %>%
 df_marginal <- df_marginal %>% 
     filter(!method %in% c("DCEE-lm", "DCEE-lm-cf")) %>% 
     mutate(method = case_when(
-        method == "DCEE-gam" ~ "hat_beta",
-        method == "DCEE-gam-cf" ~ "tilde_beta",
-        method == "SNMM" ~ "SNMM",
-        method == "GEE" ~ "GEE",
+        method == "DCEE-ranger" ~ "DCEE-rf",
+        method == "DCEE-ranger-cf" ~ "DCEE-rf-cf",
         TRUE ~ method
-    )) %>%
-    mutate(method = factor(method, levels = c("hat_beta", "tilde_beta", "SNMM", "GEE")))  # Ensure correct legend order
+    ))
+
 
 df_beta0 <- df_beta0 %>% 
     filter(!method %in% c("DCEE-lm", "DCEE-lm-cf")) %>% 
     mutate(method = case_when(
-        method == "DCEE-gam" ~ "hat_beta",
-        method == "DCEE-gam-cf" ~ "tilde_beta",
-        method == "SNMM" ~ "SNMM",
-        method == "GEE" ~ "GEE",
+        method == "DCEE-ranger" ~ "DCEE-rf",
+        method == "DCEE-ranger-cf" ~ "DCEE-rf-cf",
         TRUE ~ method
-    )) %>%
-    mutate(method = factor(method, levels = c("hat_beta", "tilde_beta", "SNMM", "GEE")))
+    ))
 
 df_beta1 <- df_beta1 %>% 
     filter(!method %in% c("DCEE-lm", "DCEE-lm-cf")) %>% 
     mutate(method = case_when(
-        method == "DCEE-gam" ~ "hat_beta",
-        method == "DCEE-gam-cf" ~ "tilde_beta",
-        method == "SNMM" ~ "SNMM",
-        method == "GEE" ~ "GEE",
+        method == "DCEE-ranger" ~ "DCEE-rf",
+        method == "DCEE-ranger-cf" ~ "DCEE-rf-cf",
         TRUE ~ method
-    )) %>%
-    mutate(method = factor(method, levels = c("hat_beta", "tilde_beta", "SNMM", "GEE")))
+    ))
+
+
+df_marginal_plot <- df_marginal %>% 
+    mutate(
+        # strip off “-cf” to get the base algorithm name
+        algorithm = sub("-cf$", "", method),
+        # logical flag: TRUE for cf‐methods, FALSE otherwise
+        is_cf     = grepl("-cf$", method),
+        # if your sample_size is a character, turn it numeric for plotting
+        sample_size = as.numeric(as.character(sample_size))
+    ) %>% 
+    mutate(algorithm = factor(algorithm, levels = c("DCEE-gam", "DCEE-rf", "SNMM", "GEE", "WCLS")))  # Ensure correct legend order
+
+df_beta0_plot <- df_beta0 %>% 
+    mutate(
+        # strip off “-cf” to get the base algorithm name
+        algorithm = sub("-cf$", "", method),
+        # logical flag: TRUE for cf‐methods, FALSE otherwise
+        is_cf     = grepl("-cf$", method),
+        # if your sample_size is a character, turn it numeric for plotting
+        sample_size = as.numeric(as.character(sample_size))
+    ) %>% 
+    mutate(algorithm = factor(algorithm, levels = c("DCEE-gam", "DCEE-rf", "SNMM", "GEE", "WCLS")))  # Ensure correct legend order
+
+df_beta1_plot <- df_beta1 %>% 
+    mutate(
+        # strip off “-cf” to get the base algorithm name
+        algorithm = sub("-cf$", "", method),
+        # logical flag: TRUE for cf‐methods, FALSE otherwise
+        is_cf     = grepl("-cf$", method),
+        # if your sample_size is a character, turn it numeric for plotting
+        sample_size = as.numeric(as.character(sample_size))
+    ) %>% 
+    mutate(algorithm = factor(algorithm, levels = c("DCEE-gam", "DCEE-rf", "SNMM", "GEE", "WCLS")))  # Ensure correct legend order
 
 my_color_scale_manual <- scale_color_manual(
     values = c(
-        "hat_beta" = "#0072B2",    # Blue
-        "tilde_beta" = "#E69F00",  # Orange
+        "DCEE-gam" = "#0072B2",    # Blue
+        "DCEE-rf" = "#E69F00",  # Orange
         "SNMM" = "#009E73",        # Green
-        "GEE" = "#CC79A7"          # Purple
+        "GEE" = "#CC79A7",          # Purple
+        "WCLS" = "#F0E442"  # yellow
     ),
     labels = c(
-        "hat_beta" = TeX("$\\hat{\\beta}$"), 
-        "tilde_beta" = TeX("$\\tilde{\\beta}$"),  
+        "DCEE-gam" = "DCEE-gam", 
+        "DCEE-rf" = "DCEE-rf",
         "SNMM" = "SNMM", 
-        "GEE" = "GEE"
+        "GEE" = "GEE",
+        "WCLS" = "WCLS"
     ),
     name = "Estimator"
 )
-
 
 library(ggplot2)
 library(patchwork)
 library(latex2exp)
 
 # Bias plot
-p_bias_marginal <- ggplot(df_marginal, aes(x = as.numeric(sample_size), y = as.numeric(bias), color = method)) +
-    geom_point() +
+p_bias_marginal <- ggplot(df_marginal_plot, aes(x = as.numeric(sample_size), y = as.numeric(bias), 
+                                                color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_1^*$"), x = "n", y = "Bias") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_bias_beta0 <- ggplot(df_beta0, aes(x = as.numeric(sample_size), y = as.numeric(bias), color = method)) +
-    geom_point() +
+p_bias_beta0 <- ggplot(df_beta0_plot, aes(x = as.numeric(sample_size), y = as.numeric(bias),
+                                     color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_2^*$"), x = "n", y = "Bias") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_bias_beta1 <- ggplot(df_beta1, aes(x = as.numeric(sample_size), y = as.numeric(bias), color = method)) +
-    geom_point() +
+p_bias_beta1 <- ggplot(df_beta1_plot, aes(x = as.numeric(sample_size), y = as.numeric(bias),
+                                     color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_3^*$"), x = "n", y = "Bias") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
 bias_plots <- (p_bias_marginal + p_bias_beta0 + p_bias_beta1) +
     plot_layout(guides = "collect") &
     theme(legend.position = "right")
 
 # SD plots
-p_sd_marginal <- ggplot(df_marginal, aes(x = as.numeric(sample_size), y = as.numeric(sd), color = method)) +
-    geom_point() +
+p_sd_marginal <- ggplot(df_marginal_plot, aes(x = as.numeric(sample_size), y = as.numeric(sd), 
+                                         color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_1^*$"), x = "n", y = "SD") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_sd_beta0 <- ggplot(df_beta0, aes(x = as.numeric(sample_size), y = as.numeric(sd), color = method)) +
-    geom_point() +
+p_sd_beta0 <- ggplot(df_beta0_plot, aes(x = as.numeric(sample_size), y = as.numeric(sd), 
+                                   color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_2^*$"), x = "n", y = "SD") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_sd_beta1 <- ggplot(df_beta1, aes(x = as.numeric(sample_size), y = as.numeric(sd), color = method)) +
-    geom_point() +
+p_sd_beta1 <- ggplot(df_beta1_plot, aes(x = as.numeric(sample_size), y = as.numeric(sd), 
+                                   color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_3^*$"), x = "n", y = "SD") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
 sd_plots <- (p_sd_marginal + p_sd_beta0 + p_sd_beta1) +
     plot_layout(guides = "collect") &
     theme(legend.position = "right")
 
 # Coverage plots
-p_cov_marginal <- ggplot(df_marginal, aes(x = as.numeric(sample_size), y = as.numeric(coverage), color = method)) +
-    geom_point() +
+p_cov_marginal <- ggplot(df_marginal_plot, aes(x = as.numeric(sample_size), y = as.numeric(coverage), 
+                                          color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0.95, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0.95, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_1^*$"), x = "n", y = "Coverage") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_cov_beta0 <- ggplot(df_beta0, aes(x = as.numeric(sample_size), y = as.numeric(coverage), color = method)) +
-    geom_point() +
+p_cov_beta0 <- ggplot(df_beta0_plot, aes(x = as.numeric(sample_size), y = as.numeric(coverage), 
+                                    color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0.95, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0.95, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_2^*$"), x = "n", y = "Coverage") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
-p_cov_beta1 <- ggplot(df_beta1, aes(x = as.numeric(sample_size), y = as.numeric(coverage), color = method)) +
-    geom_point() +
+p_cov_beta1 <- ggplot(df_beta1_plot, aes(x = as.numeric(sample_size), y = as.numeric(coverage), 
+                                    color = algorithm, linetype = is_cf)) +
+    # geom_point() +
     geom_line() +
-    geom_hline(yintercept = 0.95, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0.95, linetype = "dotted", color = "black") +
     labs(title = TeX("Estimand: $\\beta_3^*$"), x = "n", y = "Coverage") +
     theme_minimal() +
     theme(plot.title = element_text(hjust = 0.5)) +
-    my_color_scale_manual
+    my_color_scale_manual +
+    scale_linetype_manual(
+        name   = "Cross-fitting",
+        values = c(`FALSE` = "solid", `TRUE` = "dashed"),
+        labels = c(`FALSE` = "no", `TRUE` = "yes")
+    )
 
 coverage_plots <- (p_cov_marginal + p_cov_beta0 + p_cov_beta1) +
     plot_layout(guides = "collect") &
@@ -325,8 +406,29 @@ bias_plots
 sd_plots
 coverage_plots
 
-dir.create("figure", showWarnings = FALSE)
-path_to_paper <- 'figure'
-ggsave(paste0(path_to_paper, "/simulation-bias.pdf"), bias_plots, width = 9, height = 2.5)
-ggsave(paste0(path_to_paper, "/simulation-sd.pdf"), sd_plots, width = 9, height = 2.5)
-ggsave(paste0(path_to_paper, "/simulation-coverage.pdf"), coverage_plots, width = 9, height = 2.5)
+
+all_plots <- (
+    # row 1: bias
+    (p_bias_marginal + p_bias_beta0     + p_bias_beta1)  /
+        # row 2: sd
+        (p_sd_marginal   + p_sd_beta0       + p_sd_beta1)    /
+        # row 3: coverage
+        (p_cov_marginal  + p_cov_beta0      + p_cov_beta1)
+) +
+    plot_layout(guides = "collect") &          # collect a single legend
+    theme(legend.position = "right")           # put it on the right
+
+# then just print it
+# all_plots
+
+all_plots_tagged <- all_plots + plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+    theme(plot.tag = element_text(size = 12, face = "bold"),
+          plot.tag.position = c(0.005, 0.99))  # near top-left
+all_plots_tagged
+
+path_to_paper <- '/Users/tqian/Dropbox (Personal)/UCI/research/distal outcome for MRT/paper draft (Biometrics 3 - production version 2025.09.02) - distal outcome MRT/latex/figure'
+# ggsave(paste0(path_to_paper, "/simulation-bias.tiff"), bias_plots, width = 9, height = 2.5, dpi = 300)
+# ggsave(paste0(path_to_paper, "/simulation-sd.tiff"), sd_plots, width = 9, height = 2.5, dpi = 300)
+# ggsave(paste0(path_to_paper, "/simulation-coverage.tiff"), coverage_plots, width = 9, height = 2.5, dpi = 300)
+ggsave(paste0(path_to_paper, "/simulation-bias,sd,coverage.tiff"), all_plots_tagged, width = 9, height = 7.5, dpi = 300)
+ggsave(paste0(path_to_paper, "/simulation-bias,sd,coverage.pdf"), all_plots_tagged, width = 9, height = 7.5)
